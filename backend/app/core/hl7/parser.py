@@ -46,10 +46,13 @@ class HL7Segment:
                 return self._field_sep
             if index == 2:
                 return f"{self._comp_sep}{self._rep_sep}{self._esc_char}{self._sub_sep}"
-            # MSH fields are offset by 1 because MSH.1 is the separator itself
-            actual_index = index - 1
+            # MSH: fields[0]=encoding_chars(MSH.2), fields[1]=MSH.3, ...
+            # So MSH.N → fields[N-2] for N>=3
+            actual_index = index - 2
         else:
-            actual_index = index
+            # Non-MSH: fields[0]=SEG.1, fields[1]=SEG.2, ...
+            # So SEG.N → fields[N-1]
+            actual_index = index - 1
 
         if 0 <= actual_index < len(self.fields):
             return self.fields[actual_index]
@@ -82,9 +85,9 @@ class HL7Segment:
     def set_field(self, index: int, value: str) -> None:
         """Modificar un campo."""
         if self.name == "MSH":
-            actual_index = index - 1
+            actual_index = index - 2
         else:
-            actual_index = index
+            actual_index = index - 1
         while len(self.fields) <= actual_index:
             self.fields.append("")
         self.fields[actual_index] = value
