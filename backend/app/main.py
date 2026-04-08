@@ -26,6 +26,7 @@ from .agents.manager import AgentManager
 from .telemetry import init_telemetry
 from .api.routes import health, flows, routing, transforms, messages, agents, lookups
 from .core.fhir import fhir_router
+from .core.fhir.bulk_export import router as bulk_export_router
 from .middleware.tenant import TenantMiddleware
 
 logger = structlog.get_logger()
@@ -152,3 +153,4 @@ app.include_router(messages.router, prefix="/api/v1", tags=["messages"])
 app.include_router(agents.router, prefix="/api/v1", tags=["agents"])
 app.include_router(lookups.router, prefix="/api/v1", tags=["lookups"])
 app.include_router(fhir_router, tags=["fhir"])
+app.include_router(bulk_export_router, tags=["fhir-bulk"])

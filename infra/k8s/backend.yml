@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: healthflow
+  labels:
+    app: healthflow-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: healthflow-backend
+  template:
+    metadata:
+      labels:
+        app: healthflow-backend
+    spec:
+      containers:
+        - name: backend
+          image: healthflow-engine/backend:latest
+          ports:
+            - containerPort: 8000
+              name: http
+            - containerPort: 2575
+              name: mllp
+          envFrom:
+            - configMapRef:
+                name: healthflow-config
+            - secretRef:
+                name: healthflow-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: healthflow
+spec:
+  selector:
+    app: healthflow-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+    - name: mllp
+      port: 2575
+      targetPort: 2575
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mllp-external
+  namespace: healthflow
+spec:
+  selector:
+    app: healthflow-backend
+  ports:
+    - name: mllp
+      port: 2575
+      targetPort: 2575
+  type: LoadBalancer

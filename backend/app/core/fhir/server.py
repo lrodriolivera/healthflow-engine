@@ -16,6 +16,7 @@ from .subscriptions import (
     Subscription, SubscriptionFilter, SubscriptionChannel,
     SubscriptionChannelType, SubscriptionManager,
 )
+from .smart_auth import get_auth_provider
 
 router = APIRouter(prefix="/fhir", tags=["fhir"])
 
@@ -26,6 +27,12 @@ _subscription_manager = SubscriptionManager()
 
 class ConvertRequest(BaseModel):
     message: str  # Raw HL7 v2 message
+
+
+@router.get("/.well-known/smart-configuration")
+async def smart_configuration():
+    """SMART on FHIR Well-Known Configuration."""
+    return get_auth_provider().get_well_known_config()
 
 
 @router.post("/$convert", response_model=dict)
