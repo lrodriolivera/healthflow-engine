@@ -9,10 +9,13 @@ services:
       - "8000:8000"       # API REST
       - "2575:2575"       # MLLP default port (HL7)
     environment:
-      - DATABASE_URL=postgresql+asyncpg://healthflow:healthflow@postgres:5432/healthflow
-      - NATS_URL=nats://nats:4222
-      - REDIS_URL=redis://redis:6379
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HF_DATABASE_URL=postgresql+asyncpg://healthflow:healthflow@postgres:5432/healthflow
+      - HF_NATS_URL=nats://nats:4222
+      - HF_REDIS_URL=redis://redis:6379
+      - HF_AWS_REGION=${HF_AWS_REGION:-us-east-1}
+      - HF_AWS_ACCESS_KEY_ID=${HF_AWS_ACCESS_KEY_ID}
+      - HF_AWS_SECRET_ACCESS_KEY=${HF_AWS_SECRET_ACCESS_KEY}
+      - HF_OTEL_ENDPOINT=http://otel-collector:4317
     depends_on:
       - postgres
       - nats

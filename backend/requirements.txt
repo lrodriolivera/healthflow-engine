@@ -16,8 +16,8 @@ asyncpg==0.30.0
 alembic==1.14.1
 redis==5.2.1
 
-# AI
-anthropic==0.42.0
+# AI (Claude via AWS Bedrock)
+boto3>=1.34.0
 
 # HL7
 hl7==0.4.5
