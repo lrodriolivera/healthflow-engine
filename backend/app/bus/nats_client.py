@@ -81,6 +81,8 @@ class NATSClient:
         """Conectar a NATS y crear stream JetStream."""
         self._nc = await nats.connect(
             self._settings.nats_url,
+            connect_timeout=5,
+            max_reconnect_attempts=2,
             reconnected_cb=self._on_reconnect,
             disconnected_cb=self._on_disconnect,
             error_cb=self._on_error,

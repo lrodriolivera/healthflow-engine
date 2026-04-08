@@ -8,6 +8,7 @@ Punto de entrada principal. Levanta:
 4. AI agents via AWS Bedrock
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import structlog
@@ -39,15 +40,20 @@ async def lifespan(app: FastAPI):
     logger.info("healthflow_starting", version=settings.app_version)
 
     # Database
-    engine = create_engine(settings)
-    session_factory = create_session_factory(engine)
+    engine = None
+    session_factory = None
+    try:
+        engine = create_engine(settings)
+        session_factory = create_session_factory(engine)
+    except Exception as e:
+        logger.warning("db_engine_failed", error=str(e))
     app.state.db_engine = engine
     app.state.db_session_factory = session_factory
 
     # NATS JetStream
     nats_client = NATSClient(settings)
     try:
-        await nats_client.connect()
+        await asyncio.wait_for(nats_client.connect(), timeout=5)
     except Exception as e:
         logger.warning("nats_connect_failed", error=str(e))
         nats_client = None
@@ -56,7 +62,7 @@ async def lifespan(app: FastAPI):
     # Redis
     redis_client = RedisClient(settings)
     try:
-        await redis_client.connect()
+        await asyncio.wait_for(redis_client.connect(), timeout=5)
     except Exception as e:
         logger.warning("redis_connect_failed", error=str(e))
         redis_client = None
@@ -75,6 +81,8 @@ async def lifespan(app: FastAPI):
 
     # Load config from DB
     try:
+        if not session_factory:
+            raise RuntimeError("No database connection")
         async with session_factory() as session:
             await load_all(
                 session=session,
@@ -130,7 +138,8 @@ async def lifespan(app: FastAPI):
     if redis_client:
         await redis_client.close()
     await adapter_registry.stop_all()
-    await engine.dispose()
+    if engine:
+        await engine.dispose()
     logger.info("healthflow_stopped")
 
 
