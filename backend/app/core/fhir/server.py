@@ -12,11 +12,16 @@ from pydantic import BaseModel
 from ..hl7.parser import HL7Message
 from .mapper import hl7_to_fhir
 from .resources import Bundle
+from .subscriptions import (
+    Subscription, SubscriptionFilter, SubscriptionChannel,
+    SubscriptionChannelType, SubscriptionManager,
+)
 
 router = APIRouter(prefix="/fhir", tags=["fhir"])
 
-# In-memory FHIR resource store (for MVP, replace with DB later)
+# In-memory stores (for MVP, replace with DB later)
 _resources: dict[str, dict[str, dict]] = {}  # resourceType -> {id -> resource}
+_subscription_manager = SubscriptionManager()
 
 
 class ConvertRequest(BaseModel):
@@ -94,3 +99,50 @@ async def delete(resource_type: str, resource_id: str):
     if resource_id not in resources:
         raise HTTPException(404, f"{resource_type}/{resource_id} not found")
     del resources[resource_id]
+
+
+# --- Subscriptions ---
+
+class SubscriptionCreateRequest(BaseModel):
+    topic: str  # e.g., "create", "update", "*"
+    resource_type: str  # e.g., "Patient"
+    endpoint: str  # Webhook URL
+    headers: dict = {}
+
+
+@router.post("/Subscription", status_code=201)
+async def create_subscription(body: SubscriptionCreateRequest):
+    """Create a FHIR Subscription (R5-style topic-based)."""
+    sub = Subscription(
+        topic=body.topic,
+        filter=SubscriptionFilter(resource_type=body.resource_type),
+        channel=SubscriptionChannel(
+            type=SubscriptionChannelType.rest_hook,
+            endpoint=body.endpoint,
+            headers=body.headers,
+        ),
+    )
+    _subscription_manager.add(sub)
+    return {"id": sub.id, "status": sub.status.value, "topic": sub.topic}
+
+
+@router.get("/Subscription")
+async def list_subscriptions():
+    """List all active FHIR Subscriptions."""
+    return [
+        {
+            "id": s.id,
+            "status": s.status.value,
+            "topic": s.topic,
+            "resource_type": s.filter.resource_type if s.filter else "*",
+            "endpoint": s.channel.endpoint if s.channel else "",
+        }
+        for s in _subscription_manager.list_all()
+    ]
+
+
+@router.delete("/Subscription/{sub_id}", status_code=204)
+async def delete_subscription(sub_id: str):
+    """Delete a FHIR Subscription."""
+    if not _subscription_manager.remove(sub_id):
+        raise HTTPException(404, "Subscription not found")
