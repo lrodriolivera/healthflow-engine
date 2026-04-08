@@ -4,6 +4,7 @@ Database engine y session factory async para PostgreSQL + TimescaleDB.
 
 from collections.abc import AsyncGenerator
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -32,10 +33,9 @@ def create_session_factory(engine) -> async_sessionmaker[AsyncSession]:
     )
 
 
-async def get_db(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> AsyncGenerator[AsyncSession, None]:
-    """Dependency de FastAPI para obtener una session."""
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency — obtiene session del app state."""
+    session_factory = request.app.state.db_session_factory
     async with session_factory() as session:
         try:
             yield session

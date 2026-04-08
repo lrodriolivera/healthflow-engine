@@ -26,6 +26,10 @@ import structlog
 from ..bus.nats_client import NATSClient, NATSMessage
 from ..core.hl7.parser import HL7Message
 from ..core.routing.engine import RoutingEngine, RoutingDestination
+from ..telemetry import (
+    get_tracer, record_message_received, record_message_routed,
+    record_message_error, record_processing_duration,
+)
 
 if TYPE_CHECKING:
     from ..adapters.registry import AdapterRegistry
@@ -87,6 +91,7 @@ class MessagePipeline:
         try:
             # Parse HL7
             hl7_msg = HL7Message.parse(msg.raw)
+            record_message_received(hl7_msg.message_type_code, msg.flow_id)
             log = log.bind(
                 message_type=hl7_msg.message_type,
                 message_id=hl7_msg.message_control_id,
@@ -145,6 +150,9 @@ class MessagePipeline:
                 await self._nats.publish(routed_msg.subject, routed_msg)
 
             elapsed_ms = (time.monotonic() - start_time) * 1000
+            record_processing_duration(elapsed_ms, "inbound")
+            for dest in destinations:
+                record_message_routed(hl7_msg.message_type_code, dest.name)
             log.info(
                 "pipeline_inbound_processed",
                 destinations=[d.name for d in destinations],
@@ -152,6 +160,7 @@ class MessagePipeline:
             )
 
         except Exception as e:
+            record_message_error("inbound", msg.flow_id)
             log.error("pipeline_inbound_error", error=str(e))
             await self._publish_error(msg, "parse_or_route_error", str(e))
 

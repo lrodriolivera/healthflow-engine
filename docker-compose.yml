@@ -54,8 +54,20 @@ services:
     ports:
       - "4317:4317"     # gRPC
       - "4318:4318"     # HTTP
+      - "8889:8889"     # Prometheus metrics
     volumes:
       - ./infra/otel-collector-config.yml:/etc/otelcol-contrib/config.yaml
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yml"]
+    ports:
+      - "3200:3200"     # Tempo API
+    volumes:
+      - ./infra/tempo.yml:/etc/tempo.yml
+      - tempodata:/var/tempo
 
   grafana:
     image: grafana/grafana:latest
@@ -63,7 +75,13 @@ services:
       - "3001:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - tempo
+      - otel-collector
 
 volumes:
   pgdata:
   natsdata:
+  tempodata:

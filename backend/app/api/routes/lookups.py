@@ -1,69 +1,93 @@
-"""Endpoints para lookup tables."""
+"""Endpoints para lookup tables — conectado a PostgreSQL + Redis cache."""
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schemas import (
-    LookupTableCreate,
-    LookupTableResponse,
-    LookupEntryCreate,
-    LookupEntryResponse,
+    LookupTableCreate, LookupTableResponse,
+    LookupEntryCreate, LookupEntryResponse,
 )
+from ...db import get_db
+from ...models.lookup import LookupTable, LookupEntry
 
 router = APIRouter(prefix="/lookups", tags=["lookups"])
 
-# In-memory store until DB integration
-_tables: dict[str, dict] = {}
-_entries: dict[str, dict[str, dict]] = {}  # table_id -> {key -> entry}
-
 
 @router.get("", response_model=list[LookupTableResponse])
-async def list_tables():
-    return list(_tables.values())
+async def list_tables(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(LookupTable).order_by(LookupTable.name))
+    tables = result.scalars().all()
+    return [
+        LookupTableResponse(
+            id=t.id, tenant_id=t.tenant_id, name=t.name,
+            description=t.description, is_active=t.is_active,
+        )
+        for t in tables
+    ]
 
 
 @router.post("", response_model=LookupTableResponse, status_code=201)
-async def create_table(body: LookupTableCreate):
-    table_id = uuid.uuid4()
-    table = LookupTableResponse(
-        id=table_id,
+async def create_table(body: LookupTableCreate, db: AsyncSession = Depends(get_db)):
+    table = LookupTable(
+        id=uuid.uuid4(),
         tenant_id=body.tenant_id,
         name=body.name,
         description=body.description,
-        is_active=True,
     )
-    _tables[str(table_id)] = table.model_dump()
-    _entries[str(table_id)] = {}
-    return table
+    db.add(table)
+    await db.flush()
+    return LookupTableResponse(
+        id=table.id, tenant_id=table.tenant_id, name=table.name,
+        description=table.description, is_active=table.is_active,
+    )
 
 
 @router.get("/{table_id}/entries", response_model=list[LookupEntryResponse])
-async def list_entries(table_id: uuid.UUID):
-    if str(table_id) not in _tables:
+async def list_entries(table_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    table = await db.get(LookupTable, table_id)
+    if not table:
         raise HTTPException(404, "Lookup table not found")
-    entries = _entries.get(str(table_id), {})
-    return list(entries.values())
+    result = await db.execute(
+        select(LookupEntry).where(LookupEntry.table_id == table_id).order_by(LookupEntry.key)
+    )
+    entries = result.scalars().all()
+    return [
+        LookupEntryResponse(id=e.id, key=e.key, value=e.value, is_active=e.is_active)
+        for e in entries
+    ]
 
 
 @router.post("/{table_id}/entries", response_model=LookupEntryResponse, status_code=201)
-async def create_entry(table_id: uuid.UUID, body: LookupEntryCreate):
-    if str(table_id) not in _tables:
+async def create_entry(
+    table_id: uuid.UUID, body: LookupEntryCreate,
+    request: Request, db: AsyncSession = Depends(get_db),
+):
+    table = await db.get(LookupTable, table_id)
+    if not table:
         raise HTTPException(404, "Lookup table not found")
-    entry_id = uuid.uuid4()
-    entry = LookupEntryResponse(
-        id=entry_id,
+    entry = LookupEntry(
+        id=uuid.uuid4(),
+        table_id=table_id,
         key=body.key,
         value=body.value,
-        is_active=True,
     )
-    _entries.setdefault(str(table_id), {})[body.key] = entry.model_dump()
-    return entry
+    db.add(entry)
+    await db.flush()
+
+    # Sync to Redis cache if available
+    redis = getattr(request.app.state, "redis_client", None)
+    if redis and redis.is_connected:
+        await redis.set_lookup(table.name, body.key, body.value)
+
+    return LookupEntryResponse(id=entry.id, key=entry.key, value=entry.value, is_active=entry.is_active)
 
 
 @router.delete("/{table_id}", status_code=204)
-async def delete_table(table_id: uuid.UUID):
-    if str(table_id) not in _tables:
+async def delete_table(table_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    table = await db.get(LookupTable, table_id)
+    if not table:
         raise HTTPException(404, "Lookup table not found")
-    del _tables[str(table_id)]
-    _entries.pop(str(table_id), None)
+    await db.delete(table)

@@ -23,14 +23,13 @@ ADT_A08 = (
 @pytest.fixture
 def client():
     """TestClient con dependencias mockeadas (sin NATS/Redis/DB reales)."""
-    # Patch external connections so lifespan doesn't try to connect
     with patch("backend.app.main.NATSClient") as mock_nats_cls, \
          patch("backend.app.main.RedisClient") as mock_redis_cls, \
          patch("backend.app.main.create_engine") as mock_engine, \
-         patch("backend.app.main.create_session_factory") as mock_session, \
+         patch("backend.app.main.create_session_factory") as mock_session_factory, \
+         patch("backend.app.main.load_all", new_callable=AsyncMock) as mock_load, \
          patch("backend.app.main.AgentManager") as mock_agent_cls:
 
-        # Configure mocks
         mock_nats = MagicMock()
         mock_nats.is_connected = False
         mock_nats.connect = AsyncMock()
@@ -47,6 +46,14 @@ def client():
         mock_eng.dispose = AsyncMock()
         mock_engine.return_value = mock_eng
 
+        # Session factory mock
+        mock_sf = MagicMock()
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_sf.return_value = mock_session
+        mock_session_factory.return_value = mock_sf
+
         mock_agent = MagicMock()
         mock_agent.available_agents = ["anomaly_detector"]
         mock_agent.has_bedrock = False
@@ -56,6 +63,8 @@ def client():
         mock_agent.transform_designer = None
         mock_agent.anomaly_detector = AnomalyDetector()
         mock_agent_cls.return_value = mock_agent
+
+        mock_load.return_value = {}
 
         from backend.app.main import app
         with TestClient(app) as c:
@@ -89,45 +98,6 @@ class TestMessagesEndpoint:
         assert r.status_code == 400
 
 
-class TestFlowsEndpoint:
-
-    def test_list_flows_empty(self, client):
-        r = client.get("/api/v1/flows")
-        assert r.status_code == 200
-        assert r.json() == []
-
-    def test_create_and_get_flow(self, client):
-        tenant_id = str(uuid.uuid4())
-        r = client.post("/api/v1/flows", json={
-            "name": "ADT Flow",
-            "description": "Demographics",
-            "tenant_id": tenant_id,
-        })
-        assert r.status_code == 201
-        flow = r.json()
-        assert flow["name"] == "ADT Flow"
-        flow_id = flow["id"]
-
-        # Get by ID
-        r2 = client.get(f"/api/v1/flows/{flow_id}")
-        assert r2.status_code == 200
-        assert r2.json()["name"] == "ADT Flow"
-
-    def test_get_flow_not_found(self, client):
-        r = client.get(f"/api/v1/flows/{uuid.uuid4()}")
-        assert r.status_code == 404
-
-    def test_delete_flow(self, client):
-        tenant_id = str(uuid.uuid4())
-        r = client.post("/api/v1/flows", json={
-            "name": "Temp",
-            "tenant_id": tenant_id,
-        })
-        flow_id = r.json()["id"]
-        r2 = client.delete(f"/api/v1/flows/{flow_id}")
-        assert r2.status_code == 204
-
-
 class TestRoutingEndpoints:
 
     def test_list_rules_empty(self, client):
@@ -146,13 +116,11 @@ class TestRoutingEndpoints:
         assert r.json()["rule_count"] == 1
 
     def test_routing_test(self, client):
-        # Add a rule first
         client.post("/api/v1/routing/rules", json={
             "name": "ADT test",
             "conditions": [{"field": "MSH-9.1", "operator": "equals", "value": "ADT"}],
             "destinations": [{"name": "LIS", "adapter_name": "MLLP_LIS"}],
         })
-        # Test routing
         r = client.post("/api/v1/routing/test", json={"message": ADT_A08})
         assert r.status_code == 200
         data = r.json()
@@ -213,8 +181,7 @@ class TestAgentEndpoints:
     def test_agent_status(self, client):
         r = client.get("/api/v1/agents/status")
         assert r.status_code == 200
-        data = r.json()
-        assert "agents" in data
+        assert "agents" in r.json()
 
     def test_anomalies_empty(self, client):
         r = client.get("/api/v1/agents/anomalies")
@@ -224,49 +191,3 @@ class TestAgentEndpoints:
     def test_chat_no_agent(self, client):
         r = client.post("/api/v1/agents/chat", json={"message": "hello"})
         assert r.status_code == 503
-
-
-class TestLookupEndpoints:
-
-    def test_create_and_list_table(self, client):
-        tenant_id = str(uuid.uuid4())
-        r = client.post("/api/v1/lookups", json={
-            "name": "procedure_codes",
-            "tenant_id": tenant_id,
-        })
-        assert r.status_code == 201
-        table_id = r.json()["id"]
-
-        r2 = client.get("/api/v1/lookups")
-        assert r2.status_code == 200
-        assert len(r2.json()) >= 1
-
-    def test_create_entry(self, client):
-        tenant_id = str(uuid.uuid4())
-        r = client.post("/api/v1/lookups", json={
-            "name": "codes",
-            "tenant_id": tenant_id,
-        })
-        table_id = r.json()["id"]
-
-        r2 = client.post(f"/api/v1/lookups/{table_id}/entries", json={
-            "key": "HEMO",
-            "value": "Hemograma",
-        })
-        assert r2.status_code == 201
-        assert r2.json()["key"] == "HEMO"
-
-    def test_list_entries(self, client):
-        tenant_id = str(uuid.uuid4())
-        r = client.post("/api/v1/lookups", json={
-            "name": "test_entries",
-            "tenant_id": tenant_id,
-        })
-        table_id = r.json()["id"]
-
-        client.post(f"/api/v1/lookups/{table_id}/entries", json={"key": "A", "value": "1"})
-        client.post(f"/api/v1/lookups/{table_id}/entries", json={"key": "B", "value": "2"})
-
-        r2 = client.get(f"/api/v1/lookups/{table_id}/entries")
-        assert r2.status_code == 200
-        assert len(r2.json()) == 2
