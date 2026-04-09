@@ -100,9 +100,8 @@ def init_telemetry(settings: Settings, app=None) -> None:
         unit="connections",
     )
 
-    # Instrument FastAPI
-    if app:
-        FastAPIInstrumentor.instrument_app(app)
+    # Note: FastAPI instrumentation must be done before app startup.
+    # Call init_telemetry() without app parameter, or instrument manually.
 
     logger.info("otel_initialized", endpoint=settings.otel_endpoint)
 

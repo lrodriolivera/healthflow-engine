@@ -116,8 +116,8 @@ async def lifespan(app: FastAPI):
         await pipeline.start()
     app.state.pipeline = pipeline
 
-    # OpenTelemetry
-    init_telemetry(settings, app)
+    # OpenTelemetry (traces + metrics, no FastAPI instrumentation in lifespan)
+    init_telemetry(settings)
 
     logger.info(
         "healthflow_started",

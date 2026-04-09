@@ -1,5 +1,7 @@
+stream_over_http_enabled: true
 server:
   http_listen_port: 3200
+  grpc_listen_port: 9095
 
 distributor:
   receivers:
@@ -7,11 +9,13 @@ distributor:
       protocols:
         grpc:
           endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
 
 storage:
   trace:
     backend: local
-    local:
-      path: /var/tempo/traces
     wal:
       path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
